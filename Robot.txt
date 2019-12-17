@@ -1,0 +1,64 @@
+plant VehicleMovement:
+    controllable start, stop;
+
+    location idle:
+        initial;
+        edge start goto move;
+    location move:
+        edge stop goto idle;
+end
+
+plant AuxilaryMovements:
+    controllable rotate, stoprotate;
+
+    location NoRotation:
+        initial;
+        edge rotate goto Rotation;
+    location Rotation:
+        edge stoprotate goto NoRotation;
+end
+
+plant VehicleLever:
+    controllable raising, lowering;
+
+    location low:
+        initial;
+        edge raising goto high;
+    location high:
+        edge lowering goto low;
+end
+
+plant ObstacleSensor:
+    uncontrollable TurningOn, TurningOff;
+    location off:
+        initial; marked;
+        edge TurningOn goto on;
+    location on:
+        edge TurningOff goto off;
+end
+
+plant TouchSensor:
+    uncontrollable TurningOn, TurningOff;
+    location off:
+        initial; marked;
+        edge TurningOn goto on;
+    location on:
+        edge TurningOff goto off;
+end
+
+
+requirement RotateOnlyWhenVehicleIsNotMoving:
+    location idle:
+        initial;
+        marked;
+            edge VehicleMovement.start when AuxilaryMovements.NoRotation = true and ObstacleSensor.off = true and TouchSensor.off = true goto move;
+            edge VehicleLever.raising when AuxilaryMovements.NoRotation = true and VehicleMovement.idle = true;
+            edge VehicleLever.lowering when AuxilaryMovements.NoRotation = true and VehicleMovement.idle = true ;
+            edge AuxilaryMovements.rotate;
+            edge AuxilaryMovements.stoprotate;
+    location move:
+            edge VehicleMovement.stop goto idle;
+end
+
+
+
