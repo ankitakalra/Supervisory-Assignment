@@ -1,0 +1,168 @@
+// Vehicle Movements such as going forward and coming to halt
+group def robot():
+plant VehicleMovement:
+    controllable c_start, c_stop;
+    location idle:
+        initial; marked;
+        edge c_start goto move;
+    location move:
+        edge c_stop goto idle;
+end
+
+// Vehicle Auxiliary Movements
+plant AuxiliaryMovements:
+    controllable c_rotate, c_stopc_rotate;
+    location NoRotation:
+        initial;
+        marked;
+        edge c_rotate goto Rotation;
+    location Rotation:
+        edge c_stopc_rotate goto NoRotation;
+end
+
+//Vehicle Lever operation
+plant VehicleLever:
+    controllable c_Raise, c_Lower;
+    uncontrollable u_intermediate;
+    location low:
+        initial; marked;
+        edge c_Raise goto intermediate_LowToHigh;
+    location intermediate_LowToHigh:
+        edge u_intermediate when VehicleStatus.Busy = true and BatteryLevel.low = false and BatteryLevel.critical = false and AuxiliaryMovements.Rotation = false goto high;
+    location intermediate_HighToLow:
+        edge u_intermediate when VehicleStatus.Busy = true and BatteryLevel.low = false and BatteryLevel.critical = false and AuxiliaryMovements.Rotation = false goto low;
+    location high:
+        edge c_Lower goto intermediate_HighToLow;
+end
+
+
+// Obstacle Sensor
+plant ObstacleSensor:
+    uncontrollable u_TurningOn, u_TurningOff;
+    location off:
+        initial; marked;
+        edge u_TurningOn goto on;
+    location on:
+        edge u_TurningOff goto off;
+end
+
+// Touch Sensor
+plant TouchSensor:
+    uncontrollable u_TurningOn, u_TurningOff;
+    location off:
+        initial; marked;
+        edge u_TurningOn goto on;
+    location on:
+        edge u_TurningOff goto off;
+end
+
+// Battery System
+plant BatteryLevel:
+    uncontrollable u_Increase, u_Decrease, u_Replace;
+    location full:
+    initial; marked;
+        edge u_Decrease when ChargingSystem.Charging = false goto low;
+    location low:
+        edge u_Increase when ChargingSystem.Charging = true goto full;
+        edge u_Decrease when ChargingSystem.Charging = false goto critical;
+    location critical:
+        edge u_Replace goto full;
+end
+
+//Vehicle Status
+plant VehicleStatus:
+     controllable c_isAvailable, c_inProcess, c_ExecutePathPlanner , c_GetDestination, c_JobCompleted;
+     location idle:
+     initial; marked;
+        edge c_isAvailable goto Available;
+     location Available:
+        edge c_GetDestination goto FetchingDestination;
+     location FetchingDestination:
+        edge c_ExecutePathPlanner goto inExecution;
+     location inExecution:
+        edge c_inProcess goto Busy;
+     location Busy:
+        edge c_JobCompleted goto idle;
+end
+
+// Camera Sensor
+plant CameraSensor:
+    uncontrollable u_Detected;
+    controllable c_Scanning;
+    location on:
+    initial; marked;
+        edge c_Scanning goto off;
+    location off:
+        edge u_Detected goto on;
+end
+
+// Charging System
+plant ChargingSystem:
+    controllable c_startCharging, c_stopCharging, c_fetch_ChargingStation;
+    location idle:
+        initial; marked;
+        edge c_fetch_ChargingStation goto fetch;
+    location fetch:
+        edge c_startCharging goto Charging;
+    location Charging:
+        edge c_stopCharging goto idle;
+end
+
+
+// REQUIREMENTS
+requirement invariant BatteryLevel.low = true or BatteryLevel.critical = true disables VehicleLever.c_Raise;
+requirement invariant BatteryLevel.critical = true disables AuxiliaryMovements.c_rotate;
+requirement invariant BatteryLevel.low = true or BatteryLevel.critical = true disables VehicleStatus.c_isAvailable;
+requirement invariant BatteryLevel.low = true or BatteryLevel.critical = true disables VehicleStatus.c_inProcess;
+requirement invariant BatteryLevel.low = true or BatteryLevel.critical = true disables VehicleStatus.c_ExecutePathPlanner;
+requirement invariant BatteryLevel.low = true or BatteryLevel.critical = true disables VehicleStatus.c_GetDestination;
+requirement invariant AuxiliaryMovements.Rotation or BatteryLevel.low = true or CameraSensor.off or VehicleLever.intermediate_LowToHigh or VehicleLever.intermediate_HighToLow or BatteryLevel.critical = true or ChargingSystem.Charging disables VehicleStatus.c_JobCompleted;
+requirement invariant VehicleMovement.move disables AuxiliaryMovements.c_rotate;
+requirement invariant AuxiliaryMovements.Rotation disables VehicleMovement.c_start;
+requirement invariant VehicleLever.intermediate_LowToHigh disables VehicleMovement.c_start;
+requirement invariant VehicleLever.intermediate_HighToLow disables VehicleMovement.c_start;
+
+requirement PathScanning: //Initial location of the vehicle has been assumed to be determined.CameraScanning begins in order to achieve new location.
+    location Deactive:
+    initial; marked;
+        edge AuxiliaryMovements.c_rotate when CameraSensor.on; //Rotation occurs only when camera scanning is on => special movements.
+        edge VehicleLever.c_Raise when CameraSensor.on;
+        edge VehicleLever.c_Lower when CameraSensor.on;
+    end
+
+requirement ChargeWhenBatteryIsLow:
+    location Getting_Location:
+        edge ChargingSystem.c_startCharging when BatteryLevel.low and VehicleMovement.idle and AuxiliaryMovements.NoRotation and ObstacleSensor.off and TouchSensor.off and CameraSensor.on goto Charging;
+   location NoCharging:
+        initial; marked;
+        edge ChargingSystem.c_fetch_ChargingStation when BatteryLevel.low goto Getting_Location;
+   location Charging:
+       edge ChargingSystem.c_stopCharging when BatteryLevel.full goto NoCharging;
+end
+
+//c_stop Vehicle Movements while Charging, lever operations, Sensors On and Off
+requirement stopAllMovementsWhenCharging_Lever:
+    location Deactive:
+       initial;marked;
+       edge VehicleMovement.c_start when (ObstacleSensor.off and TouchSensor.off) and BatteryLevel.full and ChargingSystem.idle and VehicleStatus.Busy or( ObstacleSensor.off and TouchSensor.off and BatteryLevel.low and ChargingSystem.fetch and ChargeWhenBatteryIsLow.Getting_Location);
+       edge VehicleLever.c_Raise when ChargingSystem.idle and AuxiliaryMovements.NoRotation and VehicleMovement.idle and VehicleStatus.Busy;
+        edge VehicleLever.c_Lower when ChargingSystem.idle and AuxiliaryMovements.NoRotation and VehicleMovement.idle and VehicleStatus.Busy;
+        edge AuxiliaryMovements.c_rotate when (BatteryLevel.full and VehicleStatus.Busy)and  VehicleLever.intermediate_LowToHigh = false and ChargingSystem.idle and VehicleLever.intermediate_HighToLow = false or ChargingSystem.fetch and ChargeWhenBatteryIsLow.Getting_Location ;
+    edge VehicleMovement.c_stop when ObstacleSensor.on or TouchSensor.on or CameraSensor.on  or BatteryLevel.critical;
+end
+
+
+end
+
+group def warehouse():
+    robot1 : robot();
+    robot2 : robot();
+
+end
+
+warehouse1 : warehouse();
+
+
+
+
+
